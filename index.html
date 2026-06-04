@@ -141,7 +141,7 @@ var S={
   exercises:[],routine:{},weights:{},
   // completions: {"YYYY-MM-DD": {dayId, checks:[exId,...], closed:bool, closedAt:ts}}
   completions:{},
-  editingW:null,editingSD:null,histOpen:null,dayEditMode:false,
+  editingW:null,editingSD:null,editingNotes:null,histOpen:null,dayEditMode:false,
   libSearch:'',libFilter:'all',
   modal:null,editExData:null,
   pickerSearch:'',pickerFilter:'all',
@@ -212,6 +212,25 @@ function lastCompForDay(dayId){
     }
   }
   return null;
+}
+
+// Última sesión cerrada (cualquier día)
+function lastClosedSession(){
+  var keys=Object.keys(S.completions).sort().reverse();
+  for(var i=0;i<keys.length;i++){
+    var cp=S.completions[keys[i]];
+    if(cp.closed){
+      var dayDef=S.routine.days.find(function(d){return d.id===cp.dayId;});
+      return{dateKey:keys[i],dayLabel:dayDef?dayDef.label:'DÍA ?',dayId:cp.dayId,comp:cp};
+    }
+  }
+  return null;
+}
+// Siguiente día sugerido
+function nextDayId(lastDayId){
+  var ids=S.routine.days.map(function(d){return d.id;});
+  var idx=ids.indexOf(lastDayId);
+  return idx>=0&&idx<ids.length-1?ids[idx+1]:ids[0];
 }
 
 // ─── RENDER ──────────────────────────────────────────────────────────────────
@@ -289,6 +308,28 @@ function buildWorkout(){
       '<span style="font-size:13px">📅</span>'+
       '<div style="font-size:11px;color:#52525b">Configurar fecha de inicio de la rutina</div>'+
       '</button>';
+  }
+
+  // ── Banner última sesión ──
+  var lastSess=lastClosedSession();
+  if(lastSess){
+    var nextId=nextDayId(lastSess.dayId);
+    var nextDef=S.routine.days.find(function(d){return d.id===nextId;});
+    var nextLabel=nextDef?nextDef.label:'DÍA 1';
+    // Calcular hace cuántos días
+    var diffD=Math.floor((Date.now()-new Date(lastSess.dateKey).getTime())/(24*60*60*1000));
+    var whenStr=diffD===0?'hoy':diffD===1?'ayer':('hace '+diffD+' días');
+    h+='<div style="margin:4px 14px 2px;background:#111113;border-radius:10px;padding:9px 12px;'+
+      'border:1px solid #1c1c21;display:flex;justify-content:space-between;align-items:center">'+
+      '<div>'+
+      '<div style="font-size:10px;color:#52525b;margin-bottom:1px">Última sesión · '+whenStr+'</div>'+
+      '<div style="font-size:13px;font-weight:700;color:#fafafa">'+lastSess.dayLabel+'</div>'+
+      '</div>'+
+      '<div style="text-align:right">'+
+      '<div style="font-size:10px;color:#52525b;margin-bottom:1px">Continuá con</div>'+
+      '<div style="font-size:13px;font-weight:700;color:'+dayAcc(nextId)+'">'+nextLabel+' →</div>'+
+      '</div>'+
+      '</div>';
   }
 
   // ── Tabs de días ──
@@ -450,8 +491,32 @@ function buildExCard(asgn,def,a,tc,todayIsSameDay){
     h+='</div>';
   }
 
+  // Observaciones
+  var isEditNotes=S.editingNotes===asgn.id;
+  var hasNotes=asgn.notes&&asgn.notes.trim().length>0;
+  if(isEditNotes){
+    h+='<div style="margin-top:8px">'+
+      '<textarea id="notes-input" rows="3" placeholder="Ej: agarre ancho · espalda recta&#10;Pirámide: 1×5@60 / 2×5@70 / 3×2@80" '+
+      'style="font-size:12px;color:#94a3b8;background:#0c0c0f;border-color:#27272a;border-radius:8px;padding:8px 10px;line-height:1.5">'+
+      esc(asgn.notes||'')+'</textarea>'+
+      '<div style="display:flex;gap:6px;margin-top:5px">'+
+      '<button data-a="saveNotes" data-v="'+asgn.id+'" style="flex:1;background:'+a+';color:#fff;border-radius:8px;padding:7px;font-size:12px">Guardar</button>'+
+      '<button data-a="cancelNotes" style="flex:1;background:#27272a;color:#71717a;border-radius:8px;padding:7px;font-size:12px">Cancelar</button>'+
+      '</div></div>';
+  } else if(hasNotes){
+    h+='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:8px;'+
+      'background:#0c0c0f;border-radius:8px;padding:7px 10px;gap:8px">'+
+      '<div style="font-size:12px;color:#71717a;line-height:1.5;white-space:pre-wrap;flex:1">'+esc(asgn.notes)+'</div>'+
+      '<button data-a="editNotes" data-v="'+asgn.id+'" style="background:transparent;color:#3f3f46;font-size:11px;padding:0;flex-shrink:0;border:none">✏</button>'+
+      '</div>';
+  } else {
+    h+='<button data-a="editNotes" data-v="'+asgn.id+'" '+
+      'style="margin-top:6px;background:transparent;border:none;color:#3f3f46;font-size:11px;padding:2px 0;display:block">'+
+      '+ Observación</button>';
+  }
+
   // Historial
-  if(w&&w.hist&&w.hist.length>1&&!isEditW){
+  if(w&&w.hist&&w.hist.length>1&&!isEditW&&!isEditNotes){
     h+='<button data-a="toggleHist" data-v="'+asgn.id+'" '+
       'style="background:none;border:none;color:#3f3f46;font-size:11px;padding:5px 0 0;display:block;cursor:pointer">'+
       (isHist?'▲ Ocultar':'▼ Historial ('+w.hist.length+')')+'</button>';
@@ -786,9 +851,9 @@ function renderChart(){
 function doAction(a,v){
   switch(a){
     case 'view':
-      S.view=v;S.dayEditMode=false;S.editingW=null;S.editingSD=null;S.modal=null;render();break;
+      S.view=v;S.dayEditMode=false;S.editingW=null;S.editingSD=null;S.editingNotes=null;S.modal=null;render();break;
     case 'day':
-      S.dayId=parseInt(v);S.editingW=null;S.editingSD=null;S.histOpen=null;S.dayEditMode=false;render();break;
+      S.dayId=parseInt(v);S.editingW=null;S.editingSD=null;S.editingNotes=null;S.histOpen=null;S.dayEditMode=false;render();break;
     case 'toggleEdit':
       S.dayEditMode=!S.dayEditMode;S.editingW=null;S.editingSD=null;render();break;
 
@@ -856,6 +921,20 @@ function doAction(a,v){
       var dayAdd=S.routine.days.find(function(d){return d.id===S.dayId;});
       if(dayAdd){dayAdd.exercises.push({id:v,s:4,r:'10'});saveR();}
       S.modal=null;render();break;}
+    case 'editNotes':
+      S.editingNotes=v;S.editingW=null;S.editingSD=null;
+      render();
+      setTimeout(function(){var el=document.getElementById('notes-input');if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}},50);
+      break;
+    case 'saveNotes':{
+      var notesEl=document.getElementById('notes-input');
+      var notesVal=notesEl?notesEl.value:'';
+      var dayN=S.routine.days.find(function(d){return d.id===S.dayId;});
+      var asgnN=dayN?(dayN.exercises||[]).find(function(e){return e.id===v;}):null;
+      if(asgnN){asgnN.notes=notesVal;saveR();}
+      S.editingNotes=null;render();break;}
+    case 'cancelNotes':
+      S.editingNotes=null;render();break;
     case 'moveUp':{
       var dayUp=S.routine.days.find(function(d){return d.id===S.dayId;});
       if(dayUp){
